@@ -1,0 +1,23 @@
+# AI Analysis Demo Tests
+# These tests will fail intentionally to demonstrate AI analysis
+
+- id: ai_demo_syntax_error
+  name: Syntax error demo
+  sql: SELEC 1+1
+  expected_error: syntax error
+  tags: [ai_demo]
+  description: This SQL has a syntax error - AI should identify it
+
+- id: ai_demo_table_not_exists
+  name: Table not exists demo
+  sql: SELECT * FROM non_existent_table_xyz
+  expected_error: doesn't exist
+  tags: [ai_demo]
+  description: Query non-existent table - AI should suggest checking table name
+
+- id: ai_demo_type_mismatch
+  name: Type mismatch demo
+  sql: SELECT 'abc' + 123
+  expected_error: type mismatch
+  tags: [ai_demo]
+  description: String + integer - AI should suggest type conversion

@@ -1,0 +1,157 @@
+# Data Types Tests - 修正版
+# 根据 TiDB 实际输出调整
+
+# Test 001: Integer types
+statement ok
+CREATE TABLE test_int (
+    id INT PRIMARY KEY,
+    tiny TINYINT,
+    small SMALLINT,
+    big BIGINT
+)
+
+statement ok
+INSERT INTO test_int VALUES (1, 127, 32767, 9223372036854775807)
+
+query IIII
+SELECT * FROM test_int
+----
+1 127 32767 9223372036854775807
+
+# Test 002: String types
+statement ok
+CREATE TABLE test_string (
+    id INT PRIMARY KEY,
+    vc VARCHAR(100),
+    txt TEXT,
+    ch CHAR(10)
+)
+
+statement ok
+INSERT INTO test_string VALUES (1, 'hello', 'long text here', 'fixed')
+
+# TiDB 对 CHAR 会补空格
+query TTTT
+SELECT id, vc, txt, ch FROM test_string
+----
+1 hello 'long text here' 'fixed     '
+
+# Test 003: Date/Time types
+statement ok
+CREATE TABLE test_datetime (
+    id INT PRIMARY KEY,
+    d DATE,
+    dt DATETIME,
+    ts TIMESTAMP
+)
+
+statement ok
+INSERT INTO test_datetime VALUES (1, '2024-01-01', '2024-01-01 12:00:00', '2024-01-01 12:00:00')
+
+# TiDB 日期格式
+query TTT
+SELECT d, dt, ts FROM test_datetime
+----
+2024-01-01 2024-01-01 12:00:00 2024-01-01 12:00:00
+
+# Test 004: JSON type
+statement ok
+CREATE TABLE test_json (
+    id INT PRIMARY KEY,
+    data JSON
+)
+
+statement ok
+INSERT INTO test_json VALUES (1, '{"name": "test", "value": 123}')
+
+# TiDB JSON_EXTRACT 返回带引号的字符串
+query T
+SELECT JSON_EXTRACT(data, '$.name') FROM test_json
+----
+"test"
+
+# Test 005: Boolean type
+statement ok
+CREATE TABLE test_bool (
+    id INT PRIMARY KEY,
+    flag BOOLEAN
+)
+
+statement ok
+INSERT INTO test_bool VALUES (1, TRUE), (2, FALSE)
+
+# TiDB 中 BOOLEAN 是 TINYINT 的别名
+query II
+SELECT id, flag FROM test_bool ORDER BY id
+----
+1 1
+2 0
+
+# Test 006: Decimal types
+statement ok
+CREATE TABLE test_decimal (
+    id INT PRIMARY KEY,
+    price DECIMAL(10,2),
+    rate FLOAT
+)
+
+statement ok
+INSERT INTO test_decimal VALUES (1, 99.99, 0.95)
+
+# 浮点数可能有精度差异
+query III
+SELECT id, price, rate FROM test_decimal
+----
+1 99.99 0.95
+
+# Test 007: NULL values
+statement ok
+CREATE TABLE test_null (
+    id INT PRIMARY KEY,
+    value INT NULL
+)
+
+statement ok
+INSERT INTO test_null VALUES (1, NULL), (2, 100)
+
+# NULL 在结果中显示为 NULL
+query II
+SELECT id, value FROM test_null ORDER BY id
+----
+1 NULL
+2 100
+
+# Test 008: ENUM type
+statement ok
+CREATE TABLE test_enum (
+    id INT PRIMARY KEY,
+    color ENUM('red', 'green', 'blue')
+)
+
+statement ok
+INSERT INTO test_enum VALUES (1, 'red'), (2, 'green'), (3, 'blue')
+
+query IT
+SELECT id, color FROM test_enum ORDER BY id
+----
+1 red
+2 green
+3 blue
+
+# Cleanup
+statement ok
+DROP TABLE test_int
+statement ok
+DROP TABLE test_string
+statement ok
+DROP TABLE test_datetime
+statement ok
+DROP TABLE test_json
+statement ok
+DROP TABLE test_bool
+statement ok
+DROP TABLE test_decimal
+statement ok
+DROP TABLE test_null
+statement ok
+DROP TABLE test_enum

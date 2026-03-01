@@ -1,0 +1,46 @@
+# DML Basic Tests
+# Verify INSERT/UPDATE/DELETE operations
+
+# Setup
+statement ok
+CREATE TABLE test_dml (
+    id INT PRIMARY KEY,
+    name VARCHAR(100),
+    score INT
+)
+
+# Insert
+statement ok
+INSERT INTO test_dml VALUES (1, 'Alice', 95), (2, 'Bob', 87), (3, 'Charlie', 92)
+
+# Verify insert
+query ITI
+SELECT id, name, score FROM test_dml ORDER BY id
+----
+1 Alice 95
+2 Bob 87
+3 Charlie 92
+
+# Update
+statement ok
+UPDATE test_dml SET score = 98 WHERE id = 1
+
+# Verify update
+query II
+SELECT id, score FROM test_dml WHERE id = 1
+----
+1 98
+
+# Delete
+statement ok
+DELETE FROM test_dml WHERE id = 2
+
+# Verify delete
+query I
+SELECT COUNT(*) FROM test_dml
+----
+2
+
+# Cleanup
+statement ok
+DROP TABLE test_dml

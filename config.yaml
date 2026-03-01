@@ -1,0 +1,18 @@
+# TiDB Test Framework Configuration
+# Version: 1.0
+
+# TiDB versions configuration
+versions:
+  v7.5.0:
+    host: 127.0.0.1
+    port: 4000
+    user: root
+    database: test
+    
+  v8.5.0:
+    host: 127.0.0.1
+    port: 5000
+    user: root
+    database: test
+
+default_version: v7.5.0

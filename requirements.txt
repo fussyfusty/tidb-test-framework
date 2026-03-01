@@ -1,0 +1,26 @@
+# TiDB Test Framework Dependencies
+
+# Core dependencies
+PyYAML>=6.0          # YAML configuration parsing
+pymysql>=1.0.0       # MySQL/TiDB connection driver
+SQLAlchemy>=2.0.0    # ORM framework
+pandas>=2.0.0        # Data processing
+
+# Testing related
+pytest>=7.0.0        # Unit testing framework
+pytest-cov>=4.0.0    # Test coverage reporting
+
+# AI Integration
+openai>=1.0.0        # OpenAI API client
+tenacity>=8.0.0      # Retry mechanism for API calls
+
+# Utilities
+python-dotenv>=1.0.0 # Environment variable management
+loguru>=0.7.0        # Logging management
+tqdm>=4.65.0         # Progress bar display
+
+# Data generation (optional)
+faker>=18.0.0        # Test data generation
+
+# Monitoring and debugging
+prometheus-client>=0.17.0  # Monitoring metrics

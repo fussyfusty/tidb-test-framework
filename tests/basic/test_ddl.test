@@ -1,0 +1,30 @@
+# Very Simple DDL Tests - 避免使用复杂DDL
+# 这些测试不会触发 ingest 操作
+
+# Test 001: Create simple table
+statement ok
+CREATE TABLE test_ddl (id INT, name VARCHAR(100))
+
+# Test 002: Add column
+statement ok
+ALTER TABLE test_ddl ADD COLUMN age INT
+
+# Test 003: Create index
+statement ok
+CREATE INDEX idx_name ON test_ddl(name)
+
+# Test 004: Drop index
+statement ok
+DROP INDEX idx_name ON test_ddl
+
+# Test 005: Drop column
+statement ok
+ALTER TABLE test_ddl DROP COLUMN age
+
+# Test 006: Drop table
+statement ok
+DROP TABLE test_ddl
+
+# Test 007: Verify table is gone
+statement error Table 'test.test_ddl' doesn't exist
+SELECT * FROM test_ddl

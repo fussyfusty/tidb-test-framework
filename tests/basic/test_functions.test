@@ -1,0 +1,57 @@
+# test_functions.test
+# Basic SQL function tests for TiDB
+
+# Test 001: Basic arithmetic
+query I
+SELECT 1+1
+----
+2
+
+# Test 002: String functions
+query T
+SELECT UPPER('hello')
+----
+HELLO
+
+# Test 003: Multiple rows using UNION (TiDB compatible)
+query II
+SELECT 1, 2 UNION ALL SELECT 2, 4 UNION ALL SELECT 3, 6
+----
+1 2
+2 4
+3 6
+
+# Test 004: Date functions
+query T
+SELECT DATE('2024-01-01')
+----
+2024-01-01
+
+# Test 005: Aggregate
+query I
+SELECT COUNT(*) FROM (SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3) t
+----
+3
+
+# Test 006: Create table
+statement ok
+CREATE TABLE test_table (id INT, name VARCHAR(100))
+
+# Test 007: Insert data
+statement ok
+INSERT INTO test_table VALUES (1, 'Alice'), (2, 'Bob')
+
+# Test 008: Query results
+query IT
+SELECT id, name FROM test_table ORDER BY id
+----
+1 Alice
+2 Bob
+
+# Test 009: Error test
+statement error near "SELEC 1+1"
+SELEC 1+1
+
+# Test 010: Cleanup
+statement ok
+DROP TABLE test_table

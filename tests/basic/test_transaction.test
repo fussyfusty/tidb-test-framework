@@ -1,0 +1,56 @@
+# Transaction Tests
+# Verify ACID properties
+
+# Setup
+statement ok
+CREATE TABLE test_txn (
+    id INT PRIMARY KEY,
+    balance INT
+)
+
+statement ok
+INSERT INTO test_txn VALUES (1, 1000), (2, 500)
+
+# Test transaction commit
+statement ok
+BEGIN
+
+statement ok
+UPDATE test_txn SET balance = balance - 100 WHERE id = 1
+
+statement ok
+UPDATE test_txn SET balance = balance + 100 WHERE id = 2
+
+statement ok
+COMMIT
+
+# Verify commit
+query II
+SELECT balance FROM test_txn ORDER BY id
+----
+900
+600
+
+# Test transaction rollback
+statement ok
+BEGIN
+
+statement ok
+UPDATE test_txn SET balance = balance - 200 WHERE id = 1
+
+statement ok
+UPDATE test_txn SET balance = balance + 200 WHERE id = 2
+
+statement ok
+ROLLBACK
+
+# Verify rollback (should be unchanged)
+query II
+SELECT balance FROM test_txn ORDER BY id
+----
+900
+600
+
+# Cleanup
+statement ok
+DROP TABLE test_txn

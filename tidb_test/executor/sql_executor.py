@@ -1,0 +1,351 @@
+"""SQL test executor for TiDB."""
+
+import time
+import logging
+import re
+from typing import List, Dict, Any, Optional, Callable
+from datetime import datetime
+from pathlib import Path
+
+from tidb_test.models.test_case import TestCase, TestType
+from tidb_test.models.test_result import TestStatus, TestResult
+from tidb_test.connector import TiDBConnection, ConnectionConfig
+from tidb_test.exceptions import ExecutionError
+from tidb_test.utils import compare_results
+from tidb_test.ai_analyzer import AIFailureAnalyzer
+from tidb_test.ai_fixer import AIFixer
+
+
+class SQLExecutor:
+    """Executes SQL test cases against TiDB."""
+    
+    def __init__(self, connection: TiDBConnection, 
+    ai_analyzer: Optional[AIFailureAnalyzer] = None, 
+    ai_fixer: Optional[AIFixer] = None):
+        """Initialize executor.
+        
+        Args:
+            connection: TiDB connection instance
+            ai_analyzer: Optional AI analyzer for failure analysis
+        """
+        self.connection = connection
+        self.ai_analyzer = ai_analyzer
+        self.ai_fixer = ai_fixer
+        self.logger = logging.getLogger(__name__)
+        self.results: List[TestResult] = []
+        self.fixed_tests: List[Dict] = []
+        
+    def execute(self, test_case: TestCase, version: str = "default") -> TestResult:
+        """Execute a single test case with retry history tracking."""
+        self.logger.info(f"Executing test: {test_case.id}")
+        
+        start_time = time.time()
+        result = TestResult(
+            test_id=test_case.id,
+            status=TestStatus.RUNNING,
+            version=version
+        )
+        
+        # 记录所有重试历史
+        attempt_history = []
+        final_exec_result = None
+        
+        try:
+            # Execute any before SQL
+            if test_case.before_sql:
+                for sql in test_case.before_sql:
+                    exec_result = self.connection.execute(sql)
+                    if exec_result['status'] == 'error':
+                        raise ExecutionError(f"Before SQL failed: {exec_result['error']}")
+            
+            # Execute main SQL with retry tracking
+            for attempt in range(test_case.retry + 1):
+                attempt_start = time.time()
+                exec_result = self.connection.execute(test_case.sql, retry=0)  # 连接器层不重试，由这里控制
+                
+                # 记录这次尝试
+                attempt_record = {
+                    'attempt': attempt + 1,
+                    'duration': time.time() - attempt_start,
+                    'status': exec_result['status'],
+                    'error': exec_result.get('error') if exec_result['status'] == 'error' else None,
+                    'data': exec_result.get('data') if exec_result['status'] == 'success' else None
+                }
+                attempt_history.append(attempt_record)
+                self.logger.debug(f"Attempt {attempt + 1}: {exec_result['status']}")
+                
+                # 如果成功了，跳出循环
+                if exec_result['status'] == 'success':
+                    final_exec_result = exec_result
+                    break
+                    
+                # 如果是最后一次尝试，保存结果
+                if attempt == test_case.retry:
+                    final_exec_result = exec_result
+                    break
+                    
+                # 等待后重试（指数退避）
+                wait_time = 2 ** attempt
+                self.logger.info(f"Retry {attempt + 1}/{test_case.retry} for {test_case.id} after {wait_time}s")
+                time.sleep(wait_time)
+            
+            # 保存重试历史到结果
+            result.attempt_history = attempt_history
+            
+            # 判断最终结果（基于最后一次尝试）
+            if final_exec_result['status'] == 'error':
+                # SQL execution failed
+                if test_case.test_type == TestType.ERROR:
+                    # Expected error - check if error matches
+                    if test_case.expected_error:
+                        error_msg = final_exec_result['error']['message']
+                        if self._matches_error_pattern(error_msg, test_case.expected_error):
+                            result.status = TestStatus.PASSED
+                        else:
+                            result.status = TestStatus.FAILED
+                            result.error_msg = f"Expected error matching '{test_case.expected_error}', got: {error_msg}"
+                    else:
+                        result.status = TestStatus.PASSED
+                else:
+                    # Unexpected error
+                    result.status = TestStatus.FAILED
+                    result.error_msg = final_exec_result['error']['message']
+                    result.actual = final_exec_result['error']
+            
+            else:
+                # SQL executed successfully
+                if test_case.test_type == TestType.ERROR:
+                    # Expected error but got success
+                    result.status = TestStatus.FAILED
+                    result.error_msg = f"Expected error but statement succeeded"
+                    result.actual = final_exec_result['data']
+                
+                elif test_case.test_type == TestType.QUERY:
+                    # Check query results
+                    expected = test_case.get_expected_for_version(version)
+                    actual = final_exec_result['data']
+                    
+                    if compare_results(expected, actual, strict=False): 
+                        result.status = TestStatus.PASSED
+                    else:
+                        if self._loose_compare(expected, actual):
+                            result.status = TestStatus.PASSED
+                        else:
+                            result.status = TestStatus.FAILED
+                            result.error_msg = "Result mismatch"
+                            result.expected = expected
+                            result.actual = actual
+                
+                else:  # STATEMENT_OK
+                    result.status = TestStatus.PASSED
+            
+            # Execute any after SQL
+            if test_case.after_sql:
+                for sql in test_case.after_sql:
+                    self.connection.execute(sql)
+            
+            # AI Analysis with retry history (only for failures)
+            if result.status == TestStatus.FAILED:
+                if self.ai_analyzer:
+                # 传入完整的重试历史
+                    result.ai_analysis = self.ai_analyzer.analyze_with_retry_history(
+                        test_case, attempt_history
+                    )
+                # 尝试产出fix
+                fix_result = None
+                # if self.ai_fixer and self._is_sql_issue(attempt_history):
+                if self.ai_fixer:
+                    fix_result = self.ai_fixer.generate_fix(
+                        test_case, 
+                        final_exec_result.get('error', {}),
+                        attempt_history
+                    )
+                
+                if fix_result and fix_result['confidence'] in ['High', 'Medium']:
+                    # 保存修复后的测试
+                    if self.ai_fixer.save_fixed_test(fix_result):
+                        fix_result['run_command'] = self.ai_fixer.get_run_command(
+                            Path(fix_result['new_file_path'])
+                        )
+                        self.fixed_tests.append(fix_result)
+                        result.fix_generated = fix_result
+                
+        except Exception as e:
+            result.status = TestStatus.ERROR
+            result.error_msg = str(e)
+            self.logger.error(f"Test execution error: {e}")
+        
+        finally:
+            result.duration = time.time() - start_time
+            self.results.append(result)
+        
+        return result
+    
+    def execute_batch(self, test_cases: List[TestCase], version: str = "default") -> List[TestResult]:
+        """Execute multiple test cases sequentially."""
+        results = []
+        for test in test_cases:
+            result = self.execute(test, version)
+            results.append(result)
+            
+            # Stop on failure if test is not retryable
+            if result.status == TestStatus.FAILED and test.retry == 0:
+                self.logger.warning(f"Test failed: {test.id}")
+        
+        return results
+    
+    def _matches_error_pattern(self, error_msg: str, pattern: str) -> bool:
+        """Check if error message matches expected pattern.
+        
+        Args:
+            error_msg: Actual error message from database
+            pattern: Expected pattern (could be substring or regex)
+            
+        Returns:
+            True if error message contains the pattern or matches regex
+        """
+        # Handle error messages that come as tuples from pymysql
+        if isinstance(error_msg, tuple):
+            if len(error_msg) >= 2:
+                error_msg = str(error_msg[1])  # Use the message part
+            else:
+                error_msg = str(error_msg)
+        
+        # Convert to string and clean
+        error_msg = str(error_msg).strip()
+        pattern = str(pattern).strip()
+        
+        # Remove quotes from pattern if present (both single and double)
+        pattern = pattern.strip('"').strip("'")
+        
+        # Try regex match first
+        try:
+            if re.search(pattern, error_msg, re.IGNORECASE):
+                return True
+        except:
+            pass
+        
+        # Clean both strings for comparison
+        # Remove quotes, extra spaces, normalize
+        error_clean = re.sub(r'[\'"\s]+', ' ', error_msg).strip()
+        pattern_clean = re.sub(r'[\'"\s]+', ' ', pattern).strip()
+        
+        # Check if pattern is in error (case insensitive)
+        if pattern_clean.lower() in error_clean.lower():
+            return True
+        
+        # Try word-by-word matching for multi-word patterns
+        pattern_words = pattern_clean.split()
+        if len(pattern_words) > 1:
+            # Check if all words appear in order
+            error_lower = error_clean.lower()
+            last_pos = -1
+            for word in pattern_words:
+                pos = error_lower.find(word.lower(), last_pos + 1)
+                if pos == -1:
+                    return False
+                last_pos = pos
+            return True
+        
+        return False
+
+    def _loose_compare(self, expected, actual) -> bool:
+        """Loose comparison ignoring string quotes and whitespace."""
+        if expected is None and actual is None:
+            return True
+        
+        try:
+            # Convert both to strings and normalize
+            exp_str = str(expected).strip().replace("'", "").replace('"', "")
+            act_str = str(actual).strip().replace("'", "").replace('"', "")
+            
+            # Handle multi-line results
+            exp_lines = [l.strip() for l in exp_str.split('\n') if l.strip()]
+            act_lines = [l.strip() for l in act_str.split('\n') if l.strip()]
+            
+            if len(exp_lines) != len(act_lines):
+                return False
+            
+            for e, a in zip(exp_lines, act_lines):
+                if e != a:
+                    return False
+            return True
+        except:
+            return str(expected) == str(actual)
+    
+    def get_summary(self) -> Dict[str, int]:
+        """Get execution summary."""
+        summary = {
+            'total': len(self.results),
+            'passed': 0,
+            'failed': 0,
+            'error': 0
+        }
+        
+        for r in self.results:
+            if r.status == TestStatus.PASSED:
+                summary['passed'] += 1
+            elif r.status == TestStatus.FAILED:
+                summary['failed'] += 1
+            else:
+                summary['error'] += 1
+        
+        return summary
+    
+    def clear_results(self):
+        """Clear stored results."""
+        self.results.clear()
+
+    def _is_sql_issue(self, history: list) -> bool:
+        """判断是否是SQL本身的问题（而非环境问题）。
+        
+        Args:
+            history: 重试历史记录列表
+            
+        Returns:
+            True 如果是SQL本身的问题，False 如果是环境问题
+        """
+        if not history:
+            self.logger.debug("No history, not SQL issue")
+            return False
+        
+        # SQL相关的错误关键词
+        sql_errors = [
+            'syntax', 'parse', 'unknown column', 'doesn\'t exist', 
+            'not exist', 'error in your sql', 'syntax error',
+            'table.*doesn\'t exist', 'unknown table',
+            'you have an error in your sql', 'near',
+            'duplicate', 'primary key', 'foreign key',
+            'cannot add', 'check constraint'
+        ]
+        
+        # SQL相关的错误码 (MySQL/TiDB)
+        sql_error_codes = ['1064', '1146', '1054', '1062', '1451', '1452']
+        
+        for h in history:
+            if h['status'] == 'error' and h.get('error'):
+                error_msg = h['error'].get('message', '').lower()
+                error_code = str(h['error'].get('code', '')).lower()
+                
+                self.logger.debug(f"Checking error - msg: {error_msg[:100]}, code: {error_code}")
+                
+                # 检查错误码
+                if error_code in sql_error_codes:
+                    self.logger.debug(f"Found SQL error code: {error_code}")
+                    return True
+                
+                # 检查错误信息中的关键词
+                for pattern in sql_errors:
+                    if pattern in error_msg:
+                        self.logger.debug(f"Found SQL error keyword: {pattern}")
+                        return True
+                    
+                # 检查正则表达式模式
+                import re
+                for pattern in ['table .* does not exist', 'unknown column']:
+                    if re.search(pattern, error_msg, re.IGNORECASE):
+                        self.logger.debug(f"Found SQL error pattern: {pattern}")
+                        return True
+        
+        self.logger.debug("No SQL issue detected, likely environment issue")
+        return False

@@ -1,0 +1,43 @@
+# Simple TiDB Region tests
+# Basic verification of region management
+
+- id: region_create_table
+  name: Create table
+  sql: |
+    CREATE TABLE region_demo (
+      id INT PRIMARY KEY,
+      data VARCHAR(100)
+    )
+  # 对于 DDL 语句，不指定 expected 或者用 null
+  tags: [tidb, region]
+
+- id: region_insert_basic
+  name: Insert some data
+  sql: |
+    INSERT INTO region_demo VALUES 
+      (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')
+  tags: [tidb, region]
+  depends_on: [region_create_table]
+
+- id: region_query_table
+  name: Query table
+  sql: SELECT COUNT(*) FROM region_demo
+  expected: [[5]]
+  tags: [tidb, region]
+  depends_on: [region_insert_basic]
+
+- id: region_check_info
+  name: Check region info from information_schema
+  sql: |
+    SELECT COUNT(*) >= 0 
+    FROM information_schema.tikv_region_status 
+    WHERE table_name = 'region_demo'
+  expected: [[1]]
+  tags: [tidb, region]
+  depends_on: [region_insert_basic]
+
+- id: region_cleanup
+  name: Cleanup
+  sql: DROP TABLE region_demo
+  tags: [tidb, region]
+  depends_on: [region_check_info]

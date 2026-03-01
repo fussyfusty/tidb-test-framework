@@ -1,0 +1,10 @@
+# Syntax Error Test Cases
+# These tests have intentional syntax errors to trigger AI analysis
+
+# Test 001: Misspelled SELECT
+statement error
+SELEC 1+1
+
+# Test 002: Missing FROM clause
+statement error
+SELECT id name users
