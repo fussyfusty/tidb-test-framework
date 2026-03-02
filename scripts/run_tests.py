@@ -192,10 +192,24 @@ class TestRunner:
                 # Create AI analyzer if enabled
                 ai_analyzer = None
                 ai_fixer = None
+                # if enable_ai:
+                #     try:
+                #         from tidb_test.ai import AIFailureAnalyzer, AIFixer
+                #         api_key = os.getenv("AI_API_KEY")
+                #         if api_key:
+                #             ai_analyzer = AIFailureAnalyzer(api_key=api_key)
+                #             ai_fixer = AIFixer(api_key=api_key)
+                #             self.logger.info("🤖 AI analysis enabled")
+                #         else:
+                #             self.logger.warning("AI_API_KEY not set, AI analysis disabled")
+                #     except Exception as e:
+                #         self.logger.warning(f"Failed to initialize AI analyzer: {e}")
                 if enable_ai:
+                    self.logger.info(f"DEBUG: enable_ai is {enable_ai}")
                     try:
                         from tidb_test.ai import AIFailureAnalyzer, AIFixer
                         api_key = os.getenv("AI_API_KEY")
+                        self.logger.info(f"DEBUG: AI_API_KEY = {api_key[:5] if api_key else 'None'}...")
                         if api_key:
                             ai_analyzer = AIFailureAnalyzer(api_key=api_key)
                             ai_fixer = AIFixer(api_key=api_key)

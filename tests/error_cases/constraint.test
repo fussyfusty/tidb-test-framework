@@ -1,0 +1,11 @@
+statement ok
+CREATE TABLE test_pk (id INT PRIMARY KEY)
+
+statement error Duplicate
+INSERT INTO test_pk VALUES (1), (1)
+
+statement ok
+CREATE TABLE test_unique (id INT UNIQUE)
+
+statement error Duplicate
+INSERT INTO test_unique VALUES (1), (1)

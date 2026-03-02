@@ -1,0 +1,34 @@
+# Online DDL tests
+# Verify TiDB online DDL capabilities
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: online_cleanup_previous
+  name: Clean up existing table
+  sql: DROP TABLE IF EXISTS test_online;
+  tags: [setup, cleanup]
+
+- id: online_create_table
+  name: Create test table
+  sql: |
+    CREATE TABLE test_online (
+      id INT PRIMARY KEY,
+      name VARCHAR(100)
+    );
+  tags: [tidb, online_ddl]
+  depends_on: [online_cleanup_previous]
+
+- id: online_add_index
+  name: Add index online
+  sql: ALTER TABLE test_online ADD INDEX idx_name (name);
+  tags: [tidb, online_ddl]
+  depends_on: [online_create_table]
+
+- id: online_cleanup
+  name: Cleanup
+  sql: DROP TABLE IF EXISTS test_online;
+  tags: [tidb, online_ddl, cleanup]
+  depends_on: [online_add_index]

@@ -1,23 +1,37 @@
-# AI Analysis Demo Tests
-# These tests will fail intentionally to demonstrate AI analysis
+# AI Demo Tests - 用于测试 AI 分析功能
 
 - id: ai_demo_syntax_error
-  name: Syntax error demo
+  name: 语法错误示例（期望错误）
   sql: SELEC 1+1
   expected_error: syntax error
   tags: [ai_demo]
-  description: This SQL has a syntax error - AI should identify it
 
 - id: ai_demo_table_not_exists
-  name: Table not exists demo
+  name: 表不存在示例（期望错误）
   sql: SELECT * FROM non_existent_table_xyz
   expected_error: doesn't exist
   tags: [ai_demo]
-  description: Query non-existent table - AI should suggest checking table name
 
-- id: ai_demo_type_mismatch
-  name: Type mismatch demo
-  sql: SELECT 'abc' + 123
-  expected_error: type mismatch
+- id: ai_demo_dup_entry
+  name: 主键重复示例（期望错误）
+  sql: |
+    CREATE TABLE test_dup (id INT PRIMARY KEY);
+    INSERT INTO test_dup VALUES (1);
+    INSERT INTO test_dup VALUES (1);
+  expected_error: Duplicate entry
   tags: [ai_demo]
-  description: String + integer - AI should suggest type conversion
+
+- id: ai_demo_foreign_key
+  name: 外键约束示例（期望错误）
+  sql: |
+    CREATE TABLE test_parent (id INT PRIMARY KEY);
+    CREATE TABLE test_child (id INT, parent_id INT, FOREIGN KEY (parent_id) REFERENCES test_parent(id));
+    INSERT INTO test_child VALUES (1, 999);
+  expected_error: foreign key constraint
+  tags: [ai_demo]
+
+- id: ai_demo_real_failure
+  name: 真正的失败测试（不期望错误，但会出错）
+  sql: SELECT * FROM non_existent_table_xyz
+  expected: [[1]]  # 期望有数据，但表不存在，会真正失败
+  tags: [ai_demo]

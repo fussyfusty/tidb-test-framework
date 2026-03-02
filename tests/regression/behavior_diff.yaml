@@ -1,0 +1,49 @@
+# Version behavior difference tests
+# Document and verify intentional behavior changes
+
+- id: diff_json_extract_type
+  name: JSON_EXTRACT return type change
+  sql: SELECT JSON_EXTRACT('{"a":1}', '$.a')
+  expected_per_version:
+    v7.5.0: [[1]]
+    v8.5.0: [["1"]]
+  tags: [regression, diff, json]
+  description: v7.5.0 returns integer, v8.5.0 returns string
+
+- id: diff_default_charset
+  name: Default charset change
+  sql: |
+    CREATE TABLE test_charset (id INT);
+    SELECT DEFAULT_CHARACTER_SET_NAME 
+    FROM information_schema.SCHEMATA 
+    WHERE SCHEMA_NAME = 'test';
+  expected_per_version:
+    v7.5.0: [["utf8"]]
+    v8.5.0: [["utf8mb4"]]
+  tags: [regression, diff, charset]
+
+- id: diff_auto_increment
+  name: Auto increment behavior
+  sql: |
+    CREATE TABLE test_auto (id INT AUTO_INCREMENT PRIMARY KEY, val INT);
+    INSERT INTO test_auto (val) VALUES (100), (200);
+    SHOW TABLE STATUS LIKE 'test_auto';
+  expected_per_version:
+    v7.5.0: [["test_auto", "InnoDB", "10", "2"]]
+    v8.5.0: [["test_auto", "InnoDB", "10", "2"]]
+  tags: [regression, diff, autoinc]
+
+- id: diff_partition_syntax
+  name: Partition syntax
+  sql: |
+    CREATE TABLE test_part (
+      id INT,
+      created_at DATE
+    )
+    PARTITION BY RANGE (YEAR(created_at)) (
+      PARTITION p0 VALUES LESS THAN (2020),
+      PARTITION p1 VALUES LESS THAN (2021)
+    );
+  expected: OK
+  tags: [regression, diff, partition]
+  min_version: v5.0.0

@@ -1,0 +1,103 @@
+# Multi-version regression tests
+# Compare behavior across TiDB versions
+
+- id: reg_json_extract_type
+  name: JSON_EXTRACT return type across versions
+  sql: SELECT JSON_EXTRACT('{"a":1}', '$.a')
+  expected_per_version:
+    v7.5.0: [[1]]
+    v8.5.0: [["1"]]
+  tags: [regression, json]
+  description: v7.5.0 returns integer, v8.5.0 returns string
+
+- id: reg_json_unquote
+  name: JSON_UNQUOTE consistency
+  sql: SELECT JSON_UNQUOTE(JSON_EXTRACT('{"a":1}', '$.a'))
+  expected: [[1]]
+  tags: [regression, json]
+  description: JSON_UNQUOTE should return integer in all versions
+
+- id: reg_window_function
+  name: Window function support
+  sql: |
+    SELECT ROW_NUMBER() OVER () 
+    FROM (SELECT 1 UNION SELECT 2) t
+  expected: [[1], [2]]
+  min_version: v5.4.0
+  tags: [regression, window]
+  description: Window functions available from v5.4+
+
+- id: reg_cte_support
+  name: CTE (Common Table Expression)
+  sql: |
+    WITH t AS (SELECT 1 AS n)
+    SELECT * FROM t
+  expected: [[1]]
+  min_version: v5.0.0
+  tags: [regression, cte]
+
+- id: reg_utf8mb4_encoding
+  name: UTF8MB4 character set
+  sql: |
+    CREATE TABLE reg_utf8 (id INT, name VARCHAR(100) CHARACTER SET utf8mb4);
+    INSERT INTO reg_utf8 VALUES (1, '🔥测试🔥');
+    SELECT name FROM reg_utf8;
+  expected: [['🔥测试🔥']]
+  tags: [regression, charset]
+  description: UTF8MB4 emoji support should be consistent
+
+- id: reg_auto_increment
+  name: Auto increment behavior
+  sql: |
+    CREATE TABLE reg_auto (id INT AUTO_INCREMENT PRIMARY KEY, val INT);
+    INSERT INTO reg_auto (val) VALUES (100), (200);
+    SELECT id FROM reg_auto ORDER BY id;
+  expected: [[1], [2]]
+  tags: [regression, autoinc]
+  description: Auto increment should start from 1
+
+- id: reg_partition_syntax
+  name: Partition table syntax
+  sql: |
+    CREATE TABLE reg_part (
+      id INT,
+      created_at DATE
+    )
+    PARTITION BY RANGE (YEAR(created_at)) (
+      PARTITION p0 VALUES LESS THAN (2020),
+      PARTITION p1 VALUES LESS THAN (2021),
+      PARTITION p2 VALUES LESS THAN (2022)
+    );
+  expected: OK
+  min_version: v5.0.0
+  tags: [regression, partition]
+
+- id: reg_foreign_key
+  name: Foreign key syntax (TiDB parses but ignores)
+  sql: |
+    CREATE TABLE reg_parent (id INT PRIMARY KEY);
+    CREATE TABLE reg_child (
+      id INT,
+      parent_id INT,
+      FOREIGN KEY (parent_id) REFERENCES reg_parent(id)
+    );
+  expected: OK
+  tags: [regression, fk]
+  description: TiDB parses foreign key syntax but doesn't enforce
+
+- id: reg_sequence
+  name: Sequence object (TiDB specific)
+  sql: |
+    CREATE SEQUENCE reg_seq INCREMENT BY 1 START WITH 1;
+    SELECT NEXT VALUE FOR reg_seq;
+  expected: [[1]]
+  min_version: v4.0.0
+  tags: [regression, sequence]
+
+- id: reg_tidb_version
+  name: Version function
+  sql: SELECT VERSION();
+  expected_per_version:
+    v7.5.0: [["8.0.11-TiDB-v7.5.0"]]
+    v8.5.0: [["8.0.11-TiDB-v8.5.0"]]
+  tags: [regression, version]

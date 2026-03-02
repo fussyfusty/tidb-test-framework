@@ -1,0 +1,129 @@
+# Upgrade path tests
+# Verify that data survives version upgrades
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: upgrade_cleanup_previous
+  name: Clean up existing tables
+  sql: |
+    DROP TABLE IF EXISTS test_upgrade;
+    DROP TABLE IF EXISTS test_idx_upgrade;
+    DROP SEQUENCE IF EXISTS upgrade_seq;
+    DROP VIEW IF EXISTS test_view;
+    DROP TABLE IF EXISTS test_view_base;
+  tags: [setup, cleanup]
+
+# Data persistence tests
+- id: upgrade_create_table
+  name: Create test table
+  sql: |
+    CREATE TABLE test_upgrade (
+      id INT PRIMARY KEY,
+      value VARCHAR(100)
+    );
+  tags: [regression, upgrade]
+  depends_on: [upgrade_cleanup_previous]
+
+- id: upgrade_insert_data
+  name: Insert test data
+  sql: |
+    INSERT INTO test_upgrade VALUES (1, 'test1'), (2, 'test2');
+  tags: [regression, upgrade]
+  depends_on: [upgrade_create_table]
+
+- id: upgrade_count_data
+  name: Count data
+  sql: SELECT COUNT(*) FROM test_upgrade;
+  expected: [[2]]
+  tags: [regression, upgrade]
+  depends_on: [upgrade_insert_data]
+
+# Index persistence tests
+- id: upgrade_create_index_table
+  name: Create table for index test
+  sql: |
+    CREATE TABLE test_idx_upgrade (
+      id INT PRIMARY KEY,
+      name VARCHAR(100)
+    );
+  tags: [regression, upgrade, index]
+  depends_on: [upgrade_count_data]
+
+- id: upgrade_create_index
+  name: Create index
+  sql: CREATE INDEX idx_name ON test_idx_upgrade(name);
+  tags: [regression, upgrade, index]
+  depends_on: [upgrade_create_index_table]
+
+- id: upgrade_insert_index_data
+  name: Insert data for index test
+  sql: INSERT INTO test_idx_upgrade VALUES (1, 'test');
+  tags: [regression, upgrade, index]
+  depends_on: [upgrade_create_index]
+
+- id: upgrade_query_index
+  name: Query using index
+  sql: SELECT name FROM test_idx_upgrade WHERE name = 'test';
+  expected: [["test"]]
+  tags: [regression, upgrade, index]
+  depends_on: [upgrade_insert_index_data]
+
+# Sequence persistence tests
+- id: upgrade_create_sequence
+  name: Create sequence
+  sql: CREATE SEQUENCE upgrade_seq;
+  tags: [regression, upgrade, sequence]
+  depends_on: [upgrade_query_index]
+
+- id: upgrade_nextval
+  name: Get next sequence value
+  sql: SELECT NEXT VALUE FOR upgrade_seq;
+  expected: [[1]]
+  tags: [regression, upgrade, sequence]
+  depends_on: [upgrade_create_sequence]
+
+# View persistence tests
+- id: upgrade_create_view_base
+  name: Create base table for view
+  sql: |
+    CREATE TABLE test_view_base (
+      id INT,
+      val INT
+    );
+  tags: [regression, upgrade, view]
+  depends_on: [upgrade_nextval]
+
+- id: upgrade_create_view
+  name: Create view
+  sql: |
+    CREATE VIEW test_view AS 
+    SELECT id, val FROM test_view_base;
+  tags: [regression, upgrade, view]
+  depends_on: [upgrade_create_view_base]
+
+- id: upgrade_insert_view_data
+  name: Insert data for view
+  sql: INSERT INTO test_view_base VALUES (1, 100);
+  tags: [regression, upgrade, view]
+  depends_on: [upgrade_create_view]
+
+- id: upgrade_query_view
+  name: Query view
+  sql: SELECT * FROM test_view;
+  expected: [[1, 100]]
+  tags: [regression, upgrade, view]
+  depends_on: [upgrade_insert_view_data]
+
+- id: upgrade_final_cleanup
+  name: Final cleanup
+  sql: |
+    DROP VIEW IF EXISTS test_view;
+    DROP TABLE IF EXISTS test_view_base;
+    DROP TABLE IF EXISTS test_upgrade;
+    DROP TABLE IF EXISTS test_idx_upgrade;
+    DROP SEQUENCE IF EXISTS upgrade_seq;
+  tags: [cleanup]
+  depends_on: [upgrade_query_view]

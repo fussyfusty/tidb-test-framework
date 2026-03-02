@@ -1,0 +1,18 @@
+# AI Demo: SQL 错误测试 - 让 AI 修复
+# 这些 SQL 应该成功，但会失败，从而触发 AI 修复
+
+# 错误1：SELECT 拼写错误（应该成功但失败）
+statement
+SELEC 1+1
+
+# 错误2：缺少 FROM（应该成功但失败）
+statement
+SELECT id name
+
+# 错误3：表名错误（应该成功但失败）
+statement
+SELECT * FROM non_existent_table
+
+# 错误4：语法错误（应该成功但失败）
+statement
+SELECT * FORM users

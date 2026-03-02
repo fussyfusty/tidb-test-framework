@@ -1,0 +1,66 @@
+# HTAP (Hybrid Transactional/Analytical Processing) tests
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: htap_cleanup_previous
+  name: Clean up any existing table
+  sql: DROP TABLE IF EXISTS htap_tp;
+  tags: [setup, cleanup]
+
+- id: htap_create_table
+  name: Create HTAP test table
+  sql: |
+    CREATE TABLE htap_tp (
+      id INT PRIMARY KEY,
+      name VARCHAR(100),
+      amount DECIMAL(10,2)
+    );
+  tags: [tidb, htap, setup]
+  depends_on: [htap_cleanup_previous]
+
+- id: htap_insert_data
+  name: Insert test data
+  sql: |
+    INSERT INTO htap_tp VALUES 
+      (1, 'Alice', 100.50),
+      (2, 'Bob', 200.75),
+      (3, 'Charlie', 300.00);
+  tags: [tidb, htap]
+  depends_on: [htap_create_table]
+
+- id: htap_tp_query
+  name: TP query - SUM
+  sql: SELECT SUM(amount) FROM htap_tp;
+  expected: [[601.25]]
+  tags: [tidb, htap, tp]
+  depends_on: [htap_insert_data]
+
+- id: htap_ap_query
+  name: AP query - COUNT, AVG
+  sql: SELECT COUNT(*), AVG(amount) FROM htap_tp;
+  expected: [[3, 200.416667]]
+  tags: [tidb, htap, ap]
+  depends_on: [htap_insert_data]
+
+- id: htap_mixed_query
+  name: Mixed query with calculation
+  sql: |
+    SELECT name, amount, amount * 1.1 as with_tax 
+    FROM htap_tp 
+    WHERE amount > 150
+    ORDER BY amount;
+  expected: [
+    ["Bob", 200.75, 220.825],
+    ["Charlie", 300.00, 330.000]
+  ]
+  tags: [tidb, htap, mixed]
+  depends_on: [htap_insert_data]
+
+- id: htap_cleanup
+  name: Final cleanup
+  sql: DROP TABLE IF EXISTS htap_tp;
+  tags: [tidb, htap, cleanup]
+  depends_on: [htap_mixed_query]

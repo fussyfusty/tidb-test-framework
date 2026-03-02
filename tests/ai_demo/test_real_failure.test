@@ -1,0 +1,7 @@
+# 真正的失败测试 - 应该触发 AI 分析
+
+# 这个查询会失败（表不存在），但期望有结果
+query I
+SELECT * FROM non_existent_table_xyz
+----
+1

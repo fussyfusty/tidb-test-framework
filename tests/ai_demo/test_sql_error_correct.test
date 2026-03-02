@@ -1,0 +1,17 @@
+# AI Demo: SQL 错误测试 - 让 AI 修复
+
+# 错误1：SELECT 拼写错误
+statement ok
+SELEC 1+1
+
+# 错误2：缺少 FROM
+statement ok
+SELECT id name
+
+# 错误3：表名错误
+statement ok
+SELECT * FROM non_existent_table
+
+# 错误4：语法错误
+statement ok
+SELECT * FORM users

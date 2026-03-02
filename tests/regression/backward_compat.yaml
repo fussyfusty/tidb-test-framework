@@ -1,0 +1,42 @@
+# Backward compatibility tests
+# Verify that features work across versions
+
+- id: compat_basic_select
+  name: Basic SELECT compatibility
+  sql: SELECT 1
+  expected: [[1]]
+  tags: [regression, compatibility]
+  min_version: v3.0.0
+
+- id: compat_json_functions
+  name: JSON functions compatibility
+  sql: |
+    SELECT JSON_EXTRACT('{"a":1}', '$.a')
+  expected: [[1]]
+  tags: [regression, compatibility, json]
+  min_version: v5.0.0
+
+- id: compat_window_functions
+  name: Window functions compatibility
+  sql: |
+    SELECT ROW_NUMBER() OVER () FROM (SELECT 1 UNION SELECT 2) t
+  expected: [[1], [2]]
+  tags: [regression, compatibility, window]
+  min_version: v5.4.0
+
+- id: compat_cte
+  name: CTE compatibility
+  sql: |
+    WITH t AS (SELECT 1 AS n) SELECT * FROM t
+  expected: [[1]]
+  tags: [regression, compatibility, cte]
+  min_version: v5.0.0
+
+- id: compat_sequence
+  name: Sequence compatibility
+  sql: |
+    CREATE SEQUENCE IF NOT EXISTS test_seq;
+    SELECT NEXT VALUE FOR test_seq;
+  expected: [[1]]
+  tags: [regression, compatibility, sequence]
+  min_version: v4.0.0

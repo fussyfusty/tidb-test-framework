@@ -1,0 +1,134 @@
+# Sequence tests - with correct dependencies
+
+- id: cleanup_old_sequences
+  name: Clean up existing sequences and tables
+  sql: |
+    DROP TABLE IF EXISTS users;
+    DROP SEQUENCE IF EXISTS test_seq;
+    DROP SEQUENCE IF EXISTS user_seq;
+  tags: [setup, cleanup]
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: sequence_create
+  name: Create sequence
+  sql: |
+    CREATE SEQUENCE test_seq
+      INCREMENT BY 1
+      START WITH 1
+      MINVALUE 1
+      MAXVALUE 1000
+      CYCLE
+      CACHE 1;
+  tags: [tidb, sequence]
+  depends_on: [cleanup_old_sequences]
+
+- id: sequence_check_exists
+  name: Check sequence exists
+  sql: |
+    SELECT COUNT(*) FROM information_schema.SEQUENCES 
+    WHERE SEQUENCE_NAME = 'test_seq' AND SEQUENCE_SCHEMA = 'test';
+  expected: [[1]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_create]
+
+- id: sequence_nextval_1
+  name: Get first next value
+  sql: SELECT NEXT VALUE FOR test_seq;
+  expected: [[1]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_create]
+
+- id: sequence_nextval_2
+  name: Get second next value
+  sql: SELECT NEXT VALUE FOR test_seq;
+  expected: [[2]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_nextval_1]
+
+- id: sequence_nextval_3
+  name: Get third next value
+  sql: SELECT NEXT VALUE FOR test_seq;
+  expected: [[3]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_nextval_2]
+
+- id: sequence_currval
+  name: Get current value
+  sql: SELECT LASTVAL(test_seq);
+  expected: [[3]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_nextval_3]
+
+- id: sequence_setval
+  name: Set sequence value to 100
+  sql: SELECT SETVAL(test_seq, 100);
+  expected: [[100]]
+  tags: [tidb, sequence]
+  depends_on: [sequence_create]  # 可以直接依赖 create，不需要经过 nextval
+
+- id: sequence_alter
+  name: Alter sequence increment
+  sql: ALTER SEQUENCE test_seq INCREMENT BY 2;
+  tags: [tidb, sequence]
+  depends_on: [sequence_setval]  # 确保 sequence 存在且已设置值
+
+- id: sequence_nextval_after_alter
+  name: Next value after alter
+  sql: SELECT NEXT VALUE FOR test_seq;
+  expected: [[101]]  # 100 + 2 = 102
+  tags: [tidb, sequence]
+  depends_on: [sequence_alter]
+
+- id: sequence_drop
+  name: Drop test sequence
+  sql: DROP SEQUENCE test_seq;
+  tags: [tidb, sequence]
+  depends_on: [sequence_nextval_after_alter]
+
+- id: sequence_create_user_seq
+  name: Create user sequence
+  sql: CREATE SEQUENCE user_seq CACHE 1;
+  tags: [tidb, sequence]
+  depends_on: [sequence_drop]
+
+- id: sequence_create_users_table
+  name: Create users table
+  sql: |
+    CREATE TABLE users (
+      id INT DEFAULT NEXT VALUE FOR user_seq PRIMARY KEY,
+      name VARCHAR(100)
+    );
+  tags: [tidb, sequence, table]
+  depends_on: [sequence_create_user_seq]
+
+- id: sequence_insert_alice
+  name: Insert Alice
+  sql: INSERT INTO users (name) VALUES ('Alice');
+  tags: [tidb, sequence, table]
+  depends_on: [sequence_create_users_table]
+
+- id: sequence_insert_bob
+  name: Insert Bob
+  sql: INSERT INTO users (name) VALUES ('Bob');
+  tags: [tidb, sequence, table]
+  depends_on: [sequence_insert_alice]
+
+- id: sequence_select_users
+  name: Select users
+  sql: SELECT id, name FROM users ORDER BY id;
+  expected: [[1, "Alice"], [2, "Bob"]]
+  tags: [tidb, sequence, table]
+  depends_on: [sequence_insert_bob]
+
+- id: final_cleanup
+  name: Final cleanup
+  sql: |
+    DROP TABLE IF EXISTS users;
+    DROP SEQUENCE IF EXISTS user_seq;
+    DROP SEQUENCE IF EXISTS test_seq;
+  tags: [cleanup]
+  depends_on: [sequence_select_users]

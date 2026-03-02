@@ -3,7 +3,6 @@
 import time
 import logging
 import re
-import hashlib
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from pathlib import Path
@@ -20,137 +19,23 @@ class SQLExecutor:
     """Executes SQL test cases against TiDB."""
     
     def __init__(self, connection: TiDBConnection, 
-                 ai_analyzer: Optional[AIFailureAnalyzer] = None, 
-                 ai_fixer: Optional[AIFixer] = None,
-                 enable_isolation: bool = True):
+    ai_analyzer: Optional[AIFailureAnalyzer] = None, 
+    ai_fixer: Optional[AIFixer] = None):
         """Initialize executor.
         
         Args:
             connection: TiDB connection instance
             ai_analyzer: Optional AI analyzer for failure analysis
-            ai_fixer: Optional AI fixer for generating fixes
-            enable_isolation: Enable test isolation (auto table renaming, cleanup)
         """
         self.connection = connection
         self.ai_analyzer = ai_analyzer
         self.ai_fixer = ai_fixer
-        self.enable_isolation = enable_isolation
         self.logger = logging.getLogger(__name__)
         self.results: List[TestResult] = []
         self.fixed_tests: List[Dict] = []
-        self.created_objects: List[str] = []  # Track created tables/sequences for cleanup
-        self.test_suffix_cache = {}
-        
-    def _generate_unique_name(self, base_name: str, test_id: str) -> str:
-        """Generate a unique name for database objects."""
-        # Create a short hash from test_id
-        hash_suffix = hashlib.md5(test_id.encode()).hexdigest()[:8]
-        return f"{base_name}_{hash_suffix}"
-
-    def _get_file_suffix(self, test_case: TestCase) -> str:
-        """为同一个测试文件生成统一后缀"""
-        file_path = str(test_case.file_path)
-        if file_path not in self.test_suffix_cache:
-            # 使用文件路径生成统一后缀
-            # 这样可以确保同一个文件的所有测试使用相同的后缀
-            suffix = hashlib.md5(file_path.encode()).hexdigest()[:8]
-            self.test_suffix_cache[file_path] = suffix
-            self.logger.info(f"Generated suffix {suffix} for file {file_path}")
-        return self.test_suffix_cache[file_path]
-    
-    def _apply_isolation(self, test_case: TestCase) -> tuple[str, List[str]]:
-        """Apply test isolation by renaming objects in SQL.
-        
-        Returns:
-            Tuple of (modified SQL, list of created objects)
-        """
-        if not self.enable_isolation:
-            return test_case.sql, []
-        
-        original_sql = test_case.sql
-        modified_sql = original_sql
-        created_objects = []
-        
-        # Generate unique suffix for this test
-        suffix = self._get_file_suffix(test_case)
-        
-        # Extract all table/view/sequence names
-        tables = self._extract_table_names(original_sql)
-        
-        # 按长度排序，长的先替换，避免部分匹配问题
-        tables.sort(key=len, reverse=True)
-        
-        # Track created objects for cleanup
-        for table in tables:
-            # Check if this SQL creates the object
-            if re.search(rf'CREATE\s+TABLE\s+{table}\b', original_sql, re.IGNORECASE) or \
-               re.search(rf'CREATE\s+SEQUENCE\s+{table}\b', original_sql, re.IGNORECASE) or \
-               re.search(rf'CREATE\s+VIEW\s+{table}\b', original_sql, re.IGNORECASE):
-                created_objects.append(f"{table}_{suffix}")
-            
-            # Replace table name with unique version
-            modified_sql = re.sub(
-                rf'\b{table}\b', 
-                f"{table}_{suffix}", 
-                modified_sql
-            )
-        
-        return modified_sql, created_objects
-
-    def _extract_table_names(self, sql: str) -> List[str]:
-        """Extract table/view/sequence names from SQL."""
-        tables = []
-        
-        # 匹配所有可能的对象创建和引用
-        patterns = [
-            r'CREATE\s+TABLE\s+(\w+)',
-            r'CREATE\s+SEQUENCE\s+(\w+)',
-            r'CREATE\s+VIEW\s+(\w+)',
-            r'CREATE\s+INDEX\s+\w+\s+ON\s+(\w+)',  # 新增：匹配 CREATE INDEX ... ON table
-            r'DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)',
-            r'DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?(\w+)',
-            r'DROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?(\w+)',
-            r'DROP\s+INDEX\s+\w+\s+ON\s+(\w+)',   # 新增：匹配 DROP INDEX ... ON table
-            r'ALTER\s+TABLE\s+(\w+)',
-            r'INSERT\s+INTO\s+(\w+)',
-            r'FROM\s+(\w+)',
-            r'UPDATE\s+(\w+)',
-            r'JOIN\s+(\w+)',
-            r'NEXT\s+VALUE\s+FOR\s+(\w+)',        # 新增：匹配序列的 NEXT VALUE FOR
-            r'LASTVAL\(\s*(\w+)\s*\)',              # 新增：匹配 LASTVAL(sequence)
-            r'SETVAL\(\s*(\w+)\s*,',                # 新增：匹配 SETVAL(sequence, ...)
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, sql, re.IGNORECASE)
-            tables.extend(matches)
-        
-        # 去重并返回
-        return list(set(tables))
-
-    def _cleanup_objects(self, objects: List[str]):
-        """Clean up created database objects by trying all types."""
-        if not objects:
-            return
-            
-        self.logger.info(f"🧹 Cleaning up objects: {objects}")
-        for obj in objects:
-            # 按顺序尝试：VIEW -> TABLE -> SEQUENCE
-            for drop_cmd in [
-                f"DROP VIEW IF EXISTS {obj}",
-                f"DROP TABLE IF EXISTS {obj}", 
-                f"DROP SEQUENCE IF EXISTS {obj}"
-            ]:
-                try:
-                    self.connection.execute(drop_cmd)
-                    self.logger.info(f"  ✅ Executed: {drop_cmd}")
-                except Exception as e:
-                    self.logger.debug(f"  ⏭️  Failed: {drop_cmd} - {e}")
-            
-            self.logger.debug(f"  Complete for: {obj}")
         
     def execute(self, test_case: TestCase, version: str = "default") -> TestResult:
-        """Execute a single test case with retry history tracking and isolation."""
+        """Execute a single test case with retry history tracking."""
         self.logger.info(f"Executing test: {test_case.id}")
         
         start_time = time.time()
@@ -160,31 +45,22 @@ class SQLExecutor:
             version=version
         )
         
-        # Apply test isolation
-        isolated_sql, created_objects = self._apply_isolation(test_case)
-        
-        # 提前清理可能存在的旧对象（只清理之前运行残留的，不清理当前测试创建的）
-        if self.enable_isolation and created_objects:
-            self.logger.info(f"🧹 Pre-cleaning objects: {created_objects}")
-            self._cleanup_objects(created_objects)
-        
         # 记录所有重试历史
         attempt_history = []
         final_exec_result = None
         
         try:
-            # Execute any before SQL (with isolation)
+            # Execute any before SQL
             if test_case.before_sql:
                 for sql in test_case.before_sql:
-                    isolated_before, _ = self._apply_isolation(test_case)
-                    exec_result = self.connection.execute(isolated_before)
+                    exec_result = self.connection.execute(sql)
                     if exec_result['status'] == 'error':
                         raise ExecutionError(f"Before SQL failed: {exec_result['error']}")
             
             # Execute main SQL with retry tracking
             for attempt in range(test_case.retry + 1):
                 attempt_start = time.time()
-                exec_result = self.connection.execute(isolated_sql, retry=0)
+                exec_result = self.connection.execute(test_case.sql, retry=0)  # 连接器层不重试，由这里控制
                 
                 # 记录这次尝试
                 attempt_record = {
@@ -197,21 +73,25 @@ class SQLExecutor:
                 attempt_history.append(attempt_record)
                 self.logger.debug(f"Attempt {attempt + 1}: {exec_result['status']}")
                 
+                # 如果成功了，跳出循环
                 if exec_result['status'] == 'success':
                     final_exec_result = exec_result
                     break
                     
+                # 如果是最后一次尝试，保存结果
                 if attempt == test_case.retry:
                     final_exec_result = exec_result
                     break
                     
+                # 等待后重试（指数退避）
                 wait_time = 2 ** attempt
                 self.logger.info(f"Retry {attempt + 1}/{test_case.retry} for {test_case.id} after {wait_time}s")
                 time.sleep(wait_time)
             
+            # 保存重试历史到结果
             result.attempt_history = attempt_history
             
-            # 判断最终结果
+            # 判断最终结果（基于最后一次尝试）
             if final_exec_result['status'] == 'error':
                 # SQL execution failed
                 if test_case.test_type == TestType.ERROR:
@@ -230,14 +110,17 @@ class SQLExecutor:
                     result.status = TestStatus.FAILED
                     result.error_msg = final_exec_result['error']['message']
                     result.actual = final_exec_result['error']
+            
             else:
                 # SQL executed successfully
                 if test_case.test_type == TestType.ERROR:
+                    # Expected error but got success
                     result.status = TestStatus.FAILED
                     result.error_msg = f"Expected error but statement succeeded"
                     result.actual = final_exec_result['data']
                 
                 elif test_case.test_type == TestType.QUERY:
+                    # Check query results
                     expected = test_case.get_expected_for_version(version)
                     actual = final_exec_result['data']
                     
@@ -258,17 +141,18 @@ class SQLExecutor:
             # Execute any after SQL
             if test_case.after_sql:
                 for sql in test_case.after_sql:
-                    isolated_after, _ = self._apply_isolation(test_case)
-                    self.connection.execute(isolated_after)
+                    self.connection.execute(sql)
             
-            # AI Analysis
+            # AI Analysis with retry history (only for failures)
             if result.status == TestStatus.FAILED:
                 if self.ai_analyzer:
+                # 传入完整的重试历史
                     result.ai_analysis = self.ai_analyzer.analyze_with_retry_history(
                         test_case, attempt_history
                     )
                 # 尝试产出fix
                 fix_result = None
+                # if self.ai_fixer and self._is_sql_issue(attempt_history):
                 if self.ai_fixer:
                     fix_result = self.ai_fixer.generate_fix(
                         test_case, 
@@ -284,19 +168,13 @@ class SQLExecutor:
                         )
                         self.fixed_tests.append(fix_result)
                         result.fix_generated = fix_result
-                        
+                
         except Exception as e:
             result.status = TestStatus.ERROR
             result.error_msg = str(e)
             self.logger.error(f"Test execution error: {e}")
         
         finally:
-            # 只在测试失败时才清理创建的对象
-            # 如果测试成功，保留对象给后续测试使用
-            if self.enable_isolation and created_objects and result.status == TestStatus.FAILED:
-                self.logger.info(f"🧹 Cleaning up objects from failed test: {created_objects}")
-                self._cleanup_objects(created_objects)
-            
             result.duration = time.time() - start_time
             self.results.append(result)
         
@@ -316,32 +194,49 @@ class SQLExecutor:
         return results
     
     def _matches_error_pattern(self, error_msg: str, pattern: str) -> bool:
-        """Check if error message matches expected pattern."""
+        """Check if error message matches expected pattern.
+        
+        Args:
+            error_msg: Actual error message from database
+            pattern: Expected pattern (could be substring or regex)
+            
+        Returns:
+            True if error message contains the pattern or matches regex
+        """
         # Handle error messages that come as tuples from pymysql
         if isinstance(error_msg, tuple):
             if len(error_msg) >= 2:
-                error_msg = str(error_msg[1])
+                error_msg = str(error_msg[1])  # Use the message part
             else:
                 error_msg = str(error_msg)
         
+        # Convert to string and clean
         error_msg = str(error_msg).strip()
         pattern = str(pattern).strip()
+        
+        # Remove quotes from pattern if present (both single and double)
         pattern = pattern.strip('"').strip("'")
         
+        # Try regex match first
         try:
             if re.search(pattern, error_msg, re.IGNORECASE):
                 return True
         except:
             pass
         
+        # Clean both strings for comparison
+        # Remove quotes, extra spaces, normalize
         error_clean = re.sub(r'[\'"\s]+', ' ', error_msg).strip()
         pattern_clean = re.sub(r'[\'"\s]+', ' ', pattern).strip()
         
+        # Check if pattern is in error (case insensitive)
         if pattern_clean.lower() in error_clean.lower():
             return True
         
+        # Try word-by-word matching for multi-word patterns
         pattern_words = pattern_clean.split()
         if len(pattern_words) > 1:
+            # Check if all words appear in order
             error_lower = error_clean.lower()
             last_pos = -1
             for word in pattern_words:
@@ -360,20 +255,12 @@ class SQLExecutor:
         
         try:
             # 处理 NULL 值的特殊比较
-            # 期望值是字符串 "NULL" 或 "null"，实际值是 None
+            # 期望值是字符串 "NULL"，实际值是 None
             if isinstance(expected, str) and expected.upper() == 'NULL' and actual is None:
                 return True
-                
-            # 处理期望值是字符串但包含 "NULL" 的情况（如在列表中）
-            if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
-                if len(expected) != len(actual):
-                    print(f"🔍 List length mismatch - expected: {len(expected)}, actual: {len(actual)}")
-                    return False
-                for i, (e, a) in enumerate(zip(expected, actual)):
-                    # 递归比较每个元素
-                    if not self._loose_compare(e, a):
-                        print(f"🔍 Element {i} mismatch - expected: {e}, actual: {a}")
-                        return False
+            
+            # 处理期望值是字符串 "NULL" 但实际是 None 的情况
+            if isinstance(expected, str) and expected.upper() == 'NULL' and actual is None:
                 return True
                 
             from decimal import Decimal
@@ -388,16 +275,27 @@ class SQLExecutor:
                 if not result:
                     print(f"🔍 Numeric mismatch - expected: {expected}, actual: {actual}, diff: {abs(expected - actual)}")
                 return result
+                
+            # Handle lists/tuples recursively
+            if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
+                if len(expected) != len(actual):
+                    print(f"🔍 List length mismatch - expected: {len(expected)}, actual: {len(actual)}")
+                    return False
+                for i, (e, a) in enumerate(zip(expected, actual)):
+                    if not self._loose_compare(e, a):
+                        print(f"🔍 Element {i} mismatch - expected: {e}, actual: {a}")
+                        return False
+                return True
             
-            # Convert both to strings for comparison
+            # Convert both to strings for final comparison
             exp_str = str(expected).strip().replace("'", "").replace('"', "")
             act_str = str(actual).strip().replace("'", "").replace('"', "")
             
-            # 特殊处理：期望值是 "NULL" 或 "null"，实际是空或 None 的字符串表示
+            # 特殊处理：期望值是 "NULL" 的情况
             if exp_str.upper() == 'NULL' and act_str.lower() in ['none', 'null', '']:
                 return True
             
-            # 数字字符串比较
+            # Normalize decimal places for numeric strings
             if exp_str.replace('.', '').isdigit() and act_str.replace('.', '').isdigit():
                 try:
                     exp_float = float(exp_str)
@@ -406,7 +304,7 @@ class SQLExecutor:
                 except:
                     pass
             
-            # 多行比较
+            # Original multi-line handling
             exp_lines = [l.strip() for l in exp_str.split('\n') if l.strip()]
             act_lines = [l.strip() for l in act_str.split('\n') if l.strip()]
             
@@ -427,8 +325,7 @@ class SQLExecutor:
             'total': len(self.results),
             'passed': 0,
             'failed': 0,
-            'error': 0,
-            'fixed': len(self.fixed_tests)
+            'error': 0
         }
         
         for r in self.results:
@@ -444,29 +341,21 @@ class SQLExecutor:
     def clear_results(self):
         """Clear stored results."""
         self.results.clear()
-        self.fixed_tests.clear()
 
-    def _is_sql_issue(self, history: list, test_case=None) -> bool:
-        """判断是否是SQL本身的问题（而非环境问题）。"""
+    def _is_sql_issue(self, history: list) -> bool:
+        """判断是否是SQL本身的问题（而非环境问题）。
         
-        # 如果没有错误但测试失败，且是query类型，说明是结果不匹配
-        if test_case and test_case.test_type == 'query':
-            # 检查是否有错误
-            has_error = False
-            for h in history:
-                if h['status'] == 'error':
-                    has_error = True
-                    break
+        Args:
+            history: 重试历史记录列表
             
-            if not has_error:
-                # 没有错误但测试失败，肯定是结果不匹配
-                return True
-        
-        # 原有的错误检查逻辑
+        Returns:
+            True 如果是SQL本身的问题，False 如果是环境问题
+        """
         if not history:
             self.logger.debug("No history, not SQL issue")
             return False
         
+        # SQL相关的错误关键词
         sql_errors = [
             'syntax', 'parse', 'unknown column', 'doesn\'t exist', 
             'not exist', 'error in your sql', 'syntax error',
@@ -476,6 +365,7 @@ class SQLExecutor:
             'cannot add', 'check constraint'
         ]
         
+        # SQL相关的错误码 (MySQL/TiDB)
         sql_error_codes = ['1064', '1146', '1054', '1062', '1451', '1452']
         
         for h in history:
@@ -483,16 +373,25 @@ class SQLExecutor:
                 error_msg = h['error'].get('message', '').lower()
                 error_code = str(h['error'].get('code', '')).lower()
                 
+                self.logger.debug(f"Checking error - msg: {error_msg[:100]}, code: {error_code}")
+                
+                # 检查错误码
                 if error_code in sql_error_codes:
+                    self.logger.debug(f"Found SQL error code: {error_code}")
                     return True
                 
+                # 检查错误信息中的关键词
                 for pattern in sql_errors:
                     if pattern in error_msg:
+                        self.logger.debug(f"Found SQL error keyword: {pattern}")
                         return True
                     
+                # 检查正则表达式模式
                 import re
                 for pattern in ['table .* does not exist', 'unknown column']:
                     if re.search(pattern, error_msg, re.IGNORECASE):
+                        self.logger.debug(f"Found SQL error pattern: {pattern}")
                         return True
         
+        self.logger.debug("No SQL issue detected, likely environment issue")
         return False

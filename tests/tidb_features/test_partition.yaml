@@ -1,0 +1,146 @@
+# Partition table tests
+# Verify TiDB partitioning features
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: partition_cleanup_previous
+  name: Clean up existing tables
+  sql: |
+    DROP TABLE IF EXISTS orders_range;
+    DROP TABLE IF EXISTS orders_hash;
+    DROP TABLE IF EXISTS customers_list;
+  tags: [setup, cleanup]
+
+- id: partition_range_create
+  name: Create RANGE partitioned table
+  sql: |
+    CREATE TABLE orders_range (
+      order_id INT,
+      customer_id INT,
+      order_date DATE
+    )
+    PARTITION BY RANGE (YEAR(order_date)) (
+      PARTITION p0 VALUES LESS THAN (2020),
+      PARTITION p1 VALUES LESS THAN (2021),
+      PARTITION p2 VALUES LESS THAN (2022),
+      PARTITION p3 VALUES LESS THAN (2023)
+    );
+  tags: [tidb, partition, range]
+  depends_on: [partition_cleanup_previous]
+
+- id: partition_range_insert
+  name: Insert into RANGE partitions
+  sql: |
+    INSERT INTO orders_range VALUES 
+      (1, 101, '2019-05-10'),
+      (2, 102, '2020-08-15'),
+      (3, 103, '2021-11-20'),
+      (4, 104, '2022-03-25');
+  tags: [tidb, partition, range]
+  depends_on: [partition_range_create]
+
+- id: partition_range_query_p0
+  name: Query partition p0
+  sql: SELECT COUNT(*) FROM orders_range PARTITION (p0);
+  expected: [[1]]
+  tags: [tidb, partition, query]
+  depends_on: [partition_range_insert]
+
+- id: partition_range_query_p1
+  name: Query partition p1
+  sql: SELECT COUNT(*) FROM orders_range PARTITION (p1);
+  expected: [[1]]
+  tags: [tidb, partition, query]
+  depends_on: [partition_range_insert]
+
+- id: partition_range_query_p2
+  name: Query partition p2
+  sql: SELECT COUNT(*) FROM orders_range PARTITION (p2);
+  expected: [[1]]
+  tags: [tidb, partition, query]
+  depends_on: [partition_range_insert]
+
+- id: partition_range_query_p3
+  name: Query partition p3
+  sql: SELECT COUNT(*) FROM orders_range PARTITION (p3);
+  expected: [[1]]
+  tags: [tidb, partition, query]
+  depends_on: [partition_range_insert]
+
+- id: partition_range_query_total
+  name: Query total count
+  sql: SELECT COUNT(*) FROM orders_range;
+  expected: [[4]]
+  tags: [tidb, partition, query]
+  depends_on: [partition_range_insert]
+
+- id: partition_hash_create
+  name: Create HASH partitioned table
+  sql: |
+    CREATE TABLE orders_hash (
+      order_id INT,
+      customer_id INT
+    )
+    PARTITION BY HASH (customer_id) PARTITIONS 4;
+  tags: [tidb, partition, hash]
+  depends_on: [partition_range_query_total]
+
+- id: partition_hash_insert
+  name: Insert into HASH partitions
+  sql: |
+    INSERT INTO orders_hash VALUES 
+      (1, 101), (2, 102), (3, 103), (4, 104);
+  tags: [tidb, partition, hash]
+  depends_on: [partition_hash_create]
+
+- id: partition_hash_query
+  name: Query HASH partitioned table
+  sql: SELECT COUNT(*) FROM orders_hash;
+  expected: [[4]]
+  tags: [tidb, partition, hash]
+  depends_on: [partition_hash_insert]
+
+- id: partition_list_create
+  name: Create LIST partitioned table
+  sql: |
+    CREATE TABLE customers_list (
+      customer_id INT,
+      region VARCHAR(50)
+    )
+    PARTITION BY LIST COLUMNS(region) (
+      PARTITION p_north VALUES IN ('North', 'Northeast'),
+      PARTITION p_south VALUES IN ('South', 'Southeast'),
+      PARTITION p_west VALUES IN ('West', 'Southwest')
+    );
+  tags: [tidb, partition, list]
+  depends_on: [partition_hash_query]
+
+- id: partition_list_insert
+  name: Insert into LIST partitions
+  sql: |
+    INSERT INTO customers_list VALUES 
+      (1, 'North'),
+      (2, 'South'),
+      (3, 'West'),
+      (4, 'Northeast');
+  tags: [tidb, partition, list]
+  depends_on: [partition_list_create]
+
+- id: partition_list_query_north
+  name: Query north partition
+  sql: SELECT COUNT(*) FROM customers_list PARTITION (p_north);
+  expected: [[2]]  # North + Northeast
+  tags: [tidb, partition, list]
+  depends_on: [partition_list_insert]
+
+- id: partition_cleanup
+  name: Final cleanup
+  sql: |
+    DROP TABLE IF EXISTS orders_range;
+    DROP TABLE IF EXISTS orders_hash;
+    DROP TABLE IF EXISTS customers_list;
+  tags: [cleanup]
+  depends_on: [partition_list_query_north]

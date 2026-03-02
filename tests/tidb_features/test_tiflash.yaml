@@ -1,0 +1,34 @@
+# TiFlash tests
+# Verify TiFlash replica creation
+
+- id: enable_multi_statement
+  name: Enable multi-statement mode
+  sql: SET @@tidb_multi_statement_mode='ON'
+  tags: [setup]
+
+- id: tiflash_cleanup_previous
+  name: Clean up existing table
+  sql: DROP TABLE IF EXISTS test_tiflash;
+  tags: [setup, cleanup]
+
+- id: tiflash_create_table
+  name: Create test table
+  sql: |
+    CREATE TABLE test_tiflash (
+      id INT PRIMARY KEY,
+      value INT
+    );
+  tags: [tidb, tiflash]
+  depends_on: [tiflash_cleanup_previous]
+
+- id: tiflash_create_replica
+  name: Create TiFlash replica
+  sql: ALTER TABLE test_tiflash SET TIFLASH REPLICA 1;
+  tags: [tidb, tiflash]
+  depends_on: [tiflash_create_table]
+
+- id: tiflash_cleanup
+  name: Cleanup
+  sql: DROP TABLE IF EXISTS test_tiflash;
+  tags: [tidb, tiflash, cleanup]
+  depends_on: [tiflash_create_replica]
