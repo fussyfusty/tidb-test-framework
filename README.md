@@ -220,8 +220,8 @@ tidb-test-framework/
 │   ├── regression/              # 16+ 回归测试
 │   ├── error_cases/             # 13+ 异常测试
 │   └── extensions/              # 19+ 扩展测试
-└── docs/
-    └── design.md                # 设计文档
+└── reports/
+    └── *.json                   # 测试报告
 ```
 
 
