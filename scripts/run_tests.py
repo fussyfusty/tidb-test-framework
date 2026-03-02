@@ -2,11 +2,6 @@
 """
 TiDB Test Framework Executor
 Run tests against TiDB with various options.
-
-Usage:
-    ./run_tests.py --type basic --version v7.5.0
-    ./run_tests.py --file tests/basic/test_ddl.test
-    ./run_tests.py --type regression --versions v7.5.0,v8.5.0
 """
 
 import sys
@@ -14,12 +9,12 @@ import os
 import argparse
 import yaml
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
-import time
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tidb_test.connector import TiDBConnection, ConnectionConfig
 from tidb_test.loader.factory import LoaderFactory
@@ -28,6 +23,7 @@ from tidb_test.models.test_case import TestCase
 from tidb_test.models.test_result import TestStatus
 from tidb_test.utils import setup_logger, format_timestamp
 from tidb_test.exceptions import TiDBTestError
+from tidb_test.reporter import ConsoleReporter, JSONReporter
 
 
 class TestRunner:
@@ -37,6 +33,8 @@ class TestRunner:
         self.config = self._load_config(config_path)
         self.logger = setup_logger("tidb-runner")
         self.loader_factory = LoaderFactory()
+        self.console_reporter = ConsoleReporter()
+        self.json_reporter = JSONReporter()
         
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file."""
@@ -196,8 +194,7 @@ class TestRunner:
                 ai_fixer = None
                 if enable_ai:
                     try:
-                        from tidb_test.ai_analyzer import AIFailureAnalyzer
-                        from tidb_test.ai_fixer import AIFixer
+                        from tidb_test.ai import AIFailureAnalyzer, AIFixer
                         api_key = os.getenv("AI_API_KEY")
                         if api_key:
                             ai_analyzer = AIFailureAnalyzer(api_key=api_key)
@@ -241,152 +238,152 @@ class TestRunner:
     def generate_report(self, results: Dict, output_format: str = "console", report_file: Optional[str] = None):
         """Generate test report."""
         if output_format == "console":
-            self._console_report(results)
+            self.console_reporter.generate(results)
         elif output_format == "json":
-            self._json_report(results, report_file)  # 传递 report_file
+            self.json_reporter.generate(results, report_file)
         else:
             self.logger.warning(f"Unsupported format: {output_format}")
     
-    def _console_report(self, results: Dict):
-        """Generate console report with fix suggestions."""
-        print("\n" + "="*80)
-        print("📊 TEST EXECUTION REPORT")
-        print("="*80)
+    # def _console_report(self, results: Dict):
+    #     """Generate console report with fix suggestions."""
+    #     print("\n" + "="*80)
+    #     print("📊 TEST EXECUTION REPORT")
+    #     print("="*80)
         
-        all_fixes = []  # 收集所有修复
+    #     all_fixes = []  # 收集所有修复
         
-        for version, version_results in results.items():
-            print(f"\n📌 Version: {version}")
-            print("-" * 40)
+    #     for version, version_results in results.items():
+    #         print(f"\n📌 Version: {version}")
+    #         print("-" * 40)
             
-            passed = sum(1 for r in version_results if r.status == TestStatus.PASSED)
-            failed = sum(1 for r in version_results if r.status == TestStatus.FAILED)
+    #         passed = sum(1 for r in version_results if r.status == TestStatus.PASSED)
+    #         failed = sum(1 for r in version_results if r.status == TestStatus.FAILED)
             
-            print(f"  Passed: {passed}")
-            print(f"  Failed: {failed}")
-            print(f"  Total:  {len(version_results)}")
+    #         print(f"  Passed: {passed}")
+    #         print(f"  Failed: {failed}")
+    #         print(f"  Total:  {len(version_results)}")
             
-            # 显示失败详情和AI分析
-            if failed > 0:
-                print("\n  ❌ Failures with AI Analysis:")
-                for r in version_results:
-                    if r.status == TestStatus.FAILED:
-                        print(f"    - {r.test_id}: {r.error_msg}")
-                        if r.ai_analysis:
-                            print(f"      🤖 AI: {r.ai_analysis}")
+    #         # 显示失败详情和AI分析
+    #         if failed > 0:
+    #             print("\n  ❌ Failures with AI Analysis:")
+    #             for r in version_results:
+    #                 if r.status == TestStatus.FAILED:
+    #                     print(f"    - {r.test_id}: {r.error_msg}")
+    #                     if r.ai_analysis:
+    #                         print(f"      🤖 AI: {r.ai_analysis}")
                         
-                        # 显示生成的修复（单个Dict）
-                        if hasattr(r, 'fix_generated') and r.fix_generated:
-                            fix = r.fix_generated
-                            print(f"      🔧 AI-generated fix:")
-                            print(f"         Explanation: {fix['explanation']}")
-                            print(f"         Confidence: {fix['confidence']}")
-                            print(f"         Saved to: {fix['new_file_path']}")
-                            if fix.get('run_command'):
-                                print(f"         Run: {fix['run_command']}")
-                            if fix.get('diff'):
-                                print(f"         Diff:\n{fix['diff']}")
-                            all_fixes.append(fix)
-                        print()
+    #                     # 显示生成的修复（单个Dict）
+    #                     if hasattr(r, 'fix_generated') and r.fix_generated:
+    #                         fix = r.fix_generated
+    #                         print(f"      🔧 AI-generated fix:")
+    #                         print(f"         Explanation: {fix['explanation']}")
+    #                         print(f"         Confidence: {fix['confidence']}")
+    #                         print(f"         Saved to: {fix['new_file_path']}")
+    #                         if fix.get('run_command'):
+    #                             print(f"         Run: {fix['run_command']}")
+    #                         if fix.get('diff'):
+    #                             print(f"         Diff:\n{fix['diff']}")
+    #                         all_fixes.append(fix)
+    #                     print()
         
-        # 汇总所有生成的修复
-        if all_fixes:
-            print("\n" + "="*80)
-            print("🔧 AI-GENERATED TEST FIXES SUMMARY")
-            print("="*80)
-            for fix in all_fixes:
-                print(f"\n📝 {fix['test_id']} -> {Path(fix['new_file_path']).name}")
-                print(f"   {fix['explanation']}")
-                print(f"   Run: {fix.get('run_command', 'N/A')}")
+    #     # 汇总所有生成的修复
+    #     if all_fixes:
+    #         print("\n" + "="*80)
+    #         print("🔧 AI-GENERATED TEST FIXES SUMMARY")
+    #         print("="*80)
+    #         for fix in all_fixes:
+    #             print(f"\n📝 {fix['test_id']} -> {Path(fix['new_file_path']).name}")
+    #             print(f"   {fix['explanation']}")
+    #             print(f"   Run: {fix.get('run_command', 'N/A')}")
         
-        print("\n" + "="*80)
-        total_passed = sum(r.status == TestStatus.PASSED for vr in results.values() for r in vr)
-        total_tests = sum(len(vr) for vr in results.values())
-        print(f"SUMMARY: {total_passed}/{total_tests} passed")
-        if all_fixes:
-            print(f"🔧 Generated {len(all_fixes)} fixed test cases")
-        print("="*80)
+    #     print("\n" + "="*80)
+    #     total_passed = sum(r.status == TestStatus.PASSED for vr in results.values() for r in vr)
+    #     total_tests = sum(len(vr) for vr in results.values())
+    #     print(f"SUMMARY: {total_passed}/{total_tests} passed")
+    #     if all_fixes:
+    #         print(f"🔧 Generated {len(all_fixes)} fixed test cases")
+    #     print("="*80)
     
-    def _json_report(self, results: Dict, report_file: Optional[str] = None):
-        """Generate JSON report with fix information."""
-        import json
-        from datetime import datetime, date
-        from pathlib import Path
+    # def _json_report(self, results: Dict, report_file: Optional[str] = None):
+    #     """Generate JSON report with fix information."""
+    #     import json
+    #     from datetime import datetime, date
+    #     from pathlib import Path
         
-        # 自定义 JSON 编码器
-        class CustomJSONEncoder(json.JSONEncoder):
-            def default(self, obj):
-                if isinstance(obj, (date, datetime)):
-                    return obj.isoformat()
-                if isinstance(obj, TestStatus):
-                    return obj.value
-                try:
-                    return super().default(obj)
-                except TypeError:
-                    return str(obj)
+    #     # 自定义 JSON 编码器
+    #     class CustomJSONEncoder(json.JSONEncoder):
+    #         def default(self, obj):
+    #             if isinstance(obj, (date, datetime)):
+    #                 return obj.isoformat()
+    #             if isinstance(obj, TestStatus):
+    #                 return obj.value
+    #             try:
+    #                 return super().default(obj)
+    #             except TypeError:
+    #                 return str(obj)
         
-        # 构建报告数据
-        report = {
-            "timestamp": datetime.now().isoformat(),
-            "summary": {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "errors": 0
-            },
-            "results": {},
-            "ai_analyses": [],
-            "generated_fixes": []  # 新增：记录所有生成的修复
-        }
+    #     # 构建报告数据
+    #     report = {
+    #         "timestamp": datetime.now().isoformat(),
+    #         "summary": {
+    #             "total": 0,
+    #             "passed": 0,
+    #             "failed": 0,
+    #             "errors": 0
+    #         },
+    #         "results": {},
+    #         "ai_analyses": [],
+    #         "generated_fixes": []  # 新增：记录所有生成的修复
+    #     }
         
-        # 填充数据
-        for version, version_results in results.items():
-            report["results"][version] = []
-            for r in version_results:
-                result_dict = r.to_dict()
+    #     # 填充数据
+    #     for version, version_results in results.items():
+    #         report["results"][version] = []
+    #         for r in version_results:
+    #             result_dict = r.to_dict()
                 
-                # 确保 fix_generated 被包含在 result_dict 中
-                if hasattr(r, 'fix_generated') and r.fix_generated:
-                    result_dict['fix_generated'] = r.fix_generated
-                    # 同时添加到总的 fixes 列表
-                    report["generated_fixes"].append({
-                        "test_id": r.test_id,
-                        "version": version,
-                        "fix": r.fix_generated
-                    })
+    #             # 确保 fix_generated 被包含在 result_dict 中
+    #             if hasattr(r, 'fix_generated') and r.fix_generated:
+    #                 result_dict['fix_generated'] = r.fix_generated
+    #                 # 同时添加到总的 fixes 列表
+    #                 report["generated_fixes"].append({
+    #                     "test_id": r.test_id,
+    #                     "version": version,
+    #                     "fix": r.fix_generated
+    #                 })
                 
-                report["results"][version].append(result_dict)
+    #             report["results"][version].append(result_dict)
                 
-                # 收集AI分析
-                if result_dict.get('ai_analysis'):
-                    report["ai_analyses"].append({
-                        "test_id": result_dict['test_id'],
-                        "version": version,
-                        "analysis": result_dict['ai_analysis']
-                    })
+    #             # 收集AI分析
+    #             if result_dict.get('ai_analysis'):
+    #                 report["ai_analyses"].append({
+    #                     "test_id": result_dict['test_id'],
+    #                     "version": version,
+    #                     "analysis": result_dict['ai_analysis']
+    #                 })
             
-            report["summary"]["total"] += len(version_results)
-            report["summary"]["passed"] += sum(1 for r in version_results if r.status == TestStatus.PASSED)
-            report["summary"]["failed"] += sum(1 for r in version_results if r.status == TestStatus.FAILED)
-            report["summary"]["errors"] += sum(1 for r in version_results if r.status == TestStatus.ERROR)
+    #         report["summary"]["total"] += len(version_results)
+    #         report["summary"]["passed"] += sum(1 for r in version_results if r.status == TestStatus.PASSED)
+    #         report["summary"]["failed"] += sum(1 for r in version_results if r.status == TestStatus.FAILED)
+    #         report["summary"]["errors"] += sum(1 for r in version_results if r.status == TestStatus.ERROR)
         
-        # 打印到控制台
-        print("\n" + "="*80)
-        print("📊 JSON REPORT")
-        print("="*80)
-        print(json.dumps(report, indent=2, ensure_ascii=False, cls=CustomJSONEncoder))
+    #     # 打印到控制台
+    #     print("\n" + "="*80)
+    #     print("📊 JSON REPORT")
+    #     print("="*80)
+    #     print(json.dumps(report, indent=2, ensure_ascii=False, cls=CustomJSONEncoder))
         
-        # 写入文件
-        if report_file:
-            try:
-                file_path = Path(report_file)
-                file_path.parent.mkdir(parents=True, exist_ok=True)
+    #     # 写入文件
+    #     if report_file:
+    #         try:
+    #             file_path = Path(report_file)
+    #             file_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(report, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
-                self.logger.info(f"✅ JSON report saved to {report_file}")
-            except Exception as e:
-                self.logger.error(f"❌ Failed to save report to {report_file}: {e}")
+    #             with open(file_path, 'w', encoding='utf-8') as f:
+    #                 json.dump(report, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
+    #             self.logger.info(f"✅ JSON report saved to {report_file}")
+    #         except Exception as e:
+    #             self.logger.error(f"❌ Failed to save report to {report_file}: {e}")
 
 def parse_args():
     """Parse command line arguments."""
@@ -412,8 +409,7 @@ def parse_args():
     
     # Enable AI
     parser.add_argument("--enable-ai", action="store_true", help="Enable AI failure analysis")
-    parser.add_argument("--openai-key", help="OpenAI API key (or set OPENAI_API_KEY env var)")
-
+    
     # Test ID selection
     parser.add_argument("--test-id", help="Run specific test by ID")
 
@@ -422,6 +418,14 @@ def parse_args():
 
 def main():
     """Main entry point."""
+    print("="*60)
+    print("🚀 TiDB AI-Assisted Testing Framework (MVP)")
+    print("="*60)
+    print("✅ Core flow: Loader → Executor → AI → Reporter")
+    print("⚠️  Placeholder modules: scheduler, parser, HTML/JUnit reporters")
+    print("📌 For full implementation status, see README.md")
+    print("="*60)
+
     args = parse_args()
     
     # Configure logging

@@ -12,8 +12,7 @@ from tidb_test.models.test_result import TestStatus, TestResult
 from tidb_test.connector import TiDBConnection, ConnectionConfig
 from tidb_test.exceptions import ExecutionError
 from tidb_test.utils import compare_results
-from tidb_test.ai_analyzer import AIFailureAnalyzer
-from tidb_test.ai_fixer import AIFixer
+from tidb_test.ai import AIFailureAnalyzer, AIFixer
 
 
 class SQLExecutor:
