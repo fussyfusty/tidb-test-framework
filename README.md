@@ -315,10 +315,8 @@ graph TB
         E[VersionManager]
         E1[v7.5.0:4000]
         E2[v8.5.0:4001]
-        E3[v6.5.0:4002]
         E --- E1
         E --- E2
-        E --- E3
     end
 
     subgraph Reporter[报告生成层]
@@ -378,13 +376,13 @@ graph TD
     Filter -->|否| All[保留所有用例]
     
     TestId --> Result[最终测试集]
-    All --> Result
+    All --> Result[最终测试集]
     
     Result --> Execute[执行测试]
-    Execute --> Filter{是否指定 --enable-ai?}
+    Execute --> Filter1{是否指定 --enable-ai?}
 
-    Filter -->|是| AI检查错误结果[对sql错误产出新case]
-    Filter -->|否| Report[生成报告]
+    Filter1 -->|是| AI检查错误结果[对sql错误产出新case]
+    Filter1 -->|否| Report[生成报告]
     
     AI检查错误结果 --> Report[生成报告]
 ```
